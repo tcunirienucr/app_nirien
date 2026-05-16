@@ -1,0 +1,28 @@
+name: Sync to Hugging Face hub
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3 
+        with:
+          fetch-depth: 0
+
+      - name: Push to Hugging Face
+        env:
+          LLAVE_PARA_HUGGINGFACE: ${{ secrets.LLAVE_PARA_HUGGINGFACE }}
+        run: |
+          git config --global user.email "tc665.economia@gmail.com"
+          git config --global user.name "github-actions"
+
+          # Agregar remoto de Hugging Face (solo si no existe)
+          git remote add hf https://huggingface.co/spaces/tcunirien/app_interactiva || true
+
+          # Push al Space usando tu token
+          git push https://user:$LLAVE_PARA_HUGGINGFACE@huggingface.co/spaces/tcunirien/app_interactiva main --force
