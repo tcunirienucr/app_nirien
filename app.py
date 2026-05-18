@@ -35,7 +35,7 @@ nombre_amigable = {
 }
 
 st.title("📊 Mapa y Estadísticas — TCU Nirien")
-
+st.caption("Build de prueba HF")
 
 # ===========================
 # CARGA DE DATOS

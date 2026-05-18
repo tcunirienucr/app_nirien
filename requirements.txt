@@ -1,6 +1,7 @@
 streamlit
 pandas
 numpy
+geopandas
 folium
 branca
 plotly
