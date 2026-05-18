@@ -1,84 +1,119 @@
-import pandas as pd
+import folium
 import numpy as np
-import unicodedata
+import branca.colormap as cm
 
-# ---------------------------
-# Funciones auxiliares de limpieza
-# ---------------------------
 
-def clasificar_edad(valor):
+def preparar_gdf_mapa(gdf, df_cantonal, columna_mapa):
+    gdf_merged = gdf.merge(
+        df_cantonal,
+        how="left",
+        left_on=columna_mapa,
+        right_on="CANTON_DEF"
+    )
+
+    gdf_merged['cantidad_beneficiarios'] = gdf_merged['cantidad_beneficiarios'].fillna(0).astype(int)
+    gdf_merged['cantidad_color'] = gdf_merged['cantidad_beneficiarios'].astype(int)
+
+    columnas_para_mapa = ['geometry', columna_mapa, 'cantidad_color']
+    columnas_finales = [col for col in columnas_para_mapa if col in gdf_merged.columns]
+
+    gdf_para_mapa = gdf_merged[columnas_finales].copy()
+
+    return gdf_para_mapa, gdf_merged
+
+
+def crear_colormap(max_beneficiarios):
+    color_cero = '#ece7f2'
+    colores_escala = ['#a6bddb', '#74a9cf', '#3690c0', '#0570b0', '#034e7b']
+
+    if max_beneficiarios < 10:
+        max_beneficiarios = 10
+
     try:
-        if pd.isna(valor):
-            return 'Sin dato'
-        if isinstance(valor, (int, float, np.integer, np.floating)):
-            v = int(valor)
-            if 13 <= v <= 18:
-                return "13 a 18"
-            elif 19 <= v <= 35:
-                return "19 a 35"
-            elif 36 <= v <= 64:
-                return "36 a 64"
-            elif v >= 65 and v < 98:
-                return "Mayor a 65"
-            elif v in (98, 102, 109):
-                return "19 a 35"
-            elif v in (99, 105, 106):
-                return "36 a 64"
-            elif v == 103:
-                return "30 a 39"
-            else:
-                return 'Sin dato'
+        pasos = np.logspace(start=0, stop=np.log10(max_beneficiarios), num=6)
+        pasos = [int(round(p)) for p in pasos]
+        pasos = sorted(list(set(pasos)))
 
-        v = str(valor).strip()
-        if v == '' or v.lower() == 'información incompleta':
-            return 'Sin dato'
-        if v in ['15-19', '15 a 18', '15-18']:
-            return '13 a 18'
-        if v in ["19-35", "20-29", "20 a 29", "18 a 35 años", "20 o más", "Más de 20"]:
-            return '19 a 35'
-        if v in ["30-39", "30 a 39"]:
-            return "30 a 39"
-        if v in ["36-64", "40-49", "40 a 49", "50-59", "Más de 50", "36 a 64 años", "Más de 30"]:
-            return '36 a 64'
-        if v in ["Más de 60", "Más de 65"]:
-            return 'Mayor a 65'
-        if v in ["Sin dato"]:
-            return "Sin dato"
+        if not pasos:
+            pasos = [1, 10]
+
+        num_colores_necesarios = max(1, len(pasos) - 1)
+
+        if num_colores_necesarios > len(colores_escala):
+            colores_escala.extend([colores_escala[-1]] * (num_colores_necesarios - len(colores_escala)))
+        else:
+            colores_escala = colores_escala[:num_colores_necesarios]
 
     except Exception:
-        return 'Sin dato'
+        pasos = [1, 10]
+        colores_escala = [colores_escala[0]]
 
-    return 'Sin dato'
+    if len(pasos) < 2:
+        pasos = [1, max(2, max_beneficiarios)]
+        colores_escala = [colores_escala[0]]
 
+    colormap = cm.StepColormap(
+        colors=colores_escala,
+        index=pasos,
+        vmin=1,
+        vmax=max_beneficiarios,
+        caption='Cantidad de Beneficiarios'
+    )
 
-def normalizar_sexo(valor):
-    if pd.isna(valor):
-        return "Sin dato"
-
-    v = str(valor).strip()
-    if v == "":
-        return "Sin dato"
-
-    low = v.lower()
-
-    if low in ['femenino', 'f', 'mujer', 'female']:
-        return 'Femenino'
-    if low in ['masculino', 'm', 'hombre', 'male']:
-        return 'Masculino'
-    if low in ['no indica', 'no responde', 'no contesta', 'nr']:
-        return 'NR'
-    if low in ['sin dato', 'ns']:
-        return 'Sin dato'
-
-    return 'Sin dato'
+    return colormap, color_cero
 
 
-def strip_accents(s: str) -> str:
-    return unicodedata.normalize('NFKD', s).encode('ascii', errors='ignore').decode('utf-8') if isinstance(s, str) else s
+def crear_mapa_folium(
+    gdf_para_mapa,
+    columna_mapa,
+    colormap,
+    color_cero,
+    select_all_cantones,
+    cantones_seleccionados,
+    color_no_seleccionado='#D3D3D3'
+):
+    m = folium.Map(location=[9.7489, -83.7534], zoom_start=8)
 
+    def estilo_feature(feature):
+        props = feature.get('properties', {})
+        canton = props.get(columna_mapa, "")
+        cantidad = int(props.get('cantidad_color', 0) or 0)
 
-def safe_get_column(df, candidates):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
+        if not select_all_cantones and canton not in cantones_seleccionados:
+            return {
+                'fillColor': color_no_seleccionado,
+                'color': 'black',
+                'weight': 1,
+                'fillOpacity': 0.25
+            }
+
+        if cantidad == 0:
+            return {
+                'fillColor': color_cero,
+                'color': 'black',
+                'weight': 1,
+                'fillOpacity': 0.7
+            }
+
+        return {
+            'fillColor': colormap(cantidad),
+            'color': 'black',
+            'weight': 1,
+            'fillOpacity': 0.7
+        }
+
+    tooltip = folium.GeoJsonTooltip(
+        fields=[columna_mapa, 'cantidad_color'],
+        aliases=['Cantón', 'Beneficiarios'],
+        localize=True
+    )
+
+    folium.GeoJson(
+        data=gdf_para_mapa.__geo_interface__,
+        style_function=estilo_feature,
+        tooltip=tooltip,
+        name='Cantones'
+    ).add_to(m)
+
+    m.add_child(colormap)
+    return m

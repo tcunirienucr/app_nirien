@@ -10,12 +10,12 @@ from src.etl_logic import cargar_correcciones, crear_df_mapa
 
 # Ruta al archivo Excel original que tú editas manualmente
 RUTA_XLSX_ORIGINAL = Path(
-    r"C:\Users\ESTUDIANTE\OneDrive - Universidad de Costa Rica\Desktop\I 2026\Nirien\BASE_ORIGINAL.xlsx"
+    r"G:\Mi unidad\Logistica y administración\Datos para información interactiva\tcunirien_basetotal.xlsx"
 )
 
 # Nombre de hoja dentro del Excel.
 # Si tu archivo tiene solo una hoja principal, puedes dejar 0.
-HOJA_ORIGEN = 0
+HOJA_ORIGEN = "mayo2026v1"
 
 # =====================================================
 # RUTAS INTERNAS DEL REPO

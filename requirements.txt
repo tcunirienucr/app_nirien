@@ -1,11 +1,14 @@
 streamlit
 pandas
 numpy
-geopandas
 folium
-plotly
 branca
+plotly
 streamlit-folium
 pyarrow
 openpyxl
 xlsxwriter
+fastparquet
+fiona
+shapely
+pyproj

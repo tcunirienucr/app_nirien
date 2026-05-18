@@ -1,0 +1,32 @@
+# Entorno virtual# Entorno virtualv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Archivos temporales
+*.log
+*.tmp
+*.bak
+
+# Secrets / credenciales
+secrets.toml
+*.json.bak
+
+# Archivos grandes opcionales de auditoría (si luego no quieres subirlos)
+# data/mapa_latest.csv
+# data/reporte_invalidos_canton.csv
+
+.venv/

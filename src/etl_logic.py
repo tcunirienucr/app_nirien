@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-
 import pandas as pd
 
 from src.limpieza import clasificar_edad, normalizar_sexo, strip_accents, safe_get_column
@@ -34,39 +33,47 @@ def guardar_invalidos(invalidos, ruta_salida: Path):
     df_invalidos.to_csv(ruta_salida, index=False, encoding="utf-8-sig")
 
 
-def buscar_columna(df, posibles):
-    col = safe_get_column(df, posibles)
+def buscar_columna(df, candidatos):
+    col = safe_get_column(df, candidatos)
     if col is None:
-        raise KeyError(f"No encontré ninguna de estas columnas: {posibles}")
+        raise KeyError(f"No encontré ninguna de estas columnas: {candidatos}")
     return col
 
 
 def crear_df_mapa(df_original: pd.DataFrame, correcciones: dict, ruta_invalidos: Path) -> pd.DataFrame:
     df = df_original.copy()
 
-    # Detectar columnas con cierta tolerancia
-    col_benef = buscar_columna(df, ['beneficiario', 'BENEFICIARIO'])
-    col_edicion = buscar_columna(df, ['EDICION', 'edicion'])
-    col_canton = buscar_columna(df, ['CANTON_DEF', 'CANTON', 'CANTÓN'])
-    col_cert = buscar_columna(df, ['CERTIFICADO', 'certificado'])
-    col_des = buscar_columna(df, ['DESERCION', 'DESERCIÓN', 'desercion'])
-    col_int = buscar_columna(df, ['INTERMITENTE', 'intermitente'])
-    col_edad = buscar_columna(df, ['EDAD', 'edad'])
-    col_sexo = buscar_columna(df, ['SEXO', 'sexo'])
+    # =====================
+    # DETECTAR COLUMNAS
+    # =====================
 
-    # Filtrar beneficiarios
+    col_benef = buscar_columna(df, ['beneficiario', 'BENEFICIARIO'])
+    col_canton = buscar_columna(df, ['CANTON_FINAL'])
+    col_sexo = buscar_columna(df, ['SEXO_FINAL'])
+    col_edad = buscar_columna(df, ['EDAD_FINAL'])
+    col_curso = buscar_columna(df, ['curso'])
+    col_conv = buscar_columna(df, ['convocatoria'])
+    col_anio = buscar_columna(df, ['anio'])
+
+    col_cert = buscar_columna(df, ['CERTIFICADO'])
+    col_des = buscar_columna(df, ['DESERCION'])
+    col_int = buscar_columna(df, ['INTERMITENTE'])
+
+    # =====================
+    # FILTRAR BENEFICIARIOS
+    # =====================
+
     df_mapa = df[df[col_benef] == 1].copy()
 
-    # Parsear EDICION
-    edicion_parse = df_mapa[col_edicion].astype(str).str.extract(r'(?P<CURSO>[^-]+)-(?P<CONVOCATORIA>\d+)-(?P<AÑO>\d{4})')
-    df_mapa = pd.concat([df_mapa, edicion_parse], axis=1)
+    # =====================
+    # SELECCIONAR VARIABLES LIMPIAS
+    # =====================
 
-    # Conservar columnas deseadas
     df_mapa = df_mapa[[
         col_canton,
-        'CURSO',
-        'CONVOCATORIA',
-        'AÑO',
+        col_curso,
+        col_conv,
+        col_anio,
         col_cert,
         col_des,
         col_int,
@@ -74,7 +81,10 @@ def crear_df_mapa(df_original: pd.DataFrame, correcciones: dict, ruta_invalidos:
         col_sexo
     ]].copy()
 
-    # Renombrar a estándar
+    # =====================
+    # RENOMBRAR
+    # =====================
+
     df_mapa.columns = [
         'CANTON_DEF',
         'CURSO',
@@ -87,16 +97,19 @@ def crear_df_mapa(df_original: pd.DataFrame, correcciones: dict, ruta_invalidos:
         'SEXO'
     ]
 
-    # Reemplazos básicos
+    # =====================
+    # LIMPIEZA BÁSICA
+    # =====================
+
     df_mapa = df_mapa.fillna("NR")
 
-    # Corregir CANTON_DEF vacío o NR
     df_mapa['CANTON_DEF'] = df_mapa['CANTON_DEF'].replace(['NR', '', None], 'Sin dato')
-
-    # Aplicar correcciones existentes
     df_mapa['CANTON_DEF'] = df_mapa['CANTON_DEF'].replace(correcciones)
 
-    # Detectar inválidos después de correcciones
+    # =====================
+    # VALIDACIÓN DE CANTONES
+    # =====================
+
     invalidos = set(
         df_mapa.loc[
             ~df_mapa['CANTON_DEF'].isin(CANTONES_OFICIALES) | df_mapa['CANTON_DEF'].isna(),
@@ -106,17 +119,24 @@ def crear_df_mapa(df_original: pd.DataFrame, correcciones: dict, ruta_invalidos:
 
     if invalidos:
         guardar_invalidos(invalidos, ruta_invalidos)
-        raise ValueError(
-            f"Se detectaron cantones inválidos. Revisa el archivo: {ruta_invalidos}"
-        )
+        raise ValueError(f"Se detectaron cantones inválidos. Ver: {ruta_invalidos}")
 
-    # Normalizaciones extra para acelerar la app
+    # =====================
+    # NORMALIZACIÓN FINAL
+    # =====================
+
     df_mapa['CURSO_NORMALIZADO'] = df_mapa['CURSO'].astype(str).str.lower().apply(strip_accents).str.strip()
     df_mapa['AÑO'] = pd.to_numeric(df_mapa['AÑO'], errors='coerce').astype('Int64')
+
     df_mapa['CERTIFICADO'] = pd.to_numeric(df_mapa['CERTIFICADO'], errors='coerce').fillna(0).astype(int)
     df_mapa['DESERCION'] = pd.to_numeric(df_mapa['DESERCION'], errors='coerce').fillna(0).astype(int)
     df_mapa['INTERMITENTE'] = pd.to_numeric(df_mapa['INTERMITENTE'], errors='coerce').fillna(0).astype(int)
+
     df_mapa['EDAD_CLASIFICADA'] = df_mapa['EDAD'].apply(clasificar_edad)
     df_mapa['SEXO_NORMALIZADO'] = df_mapa['SEXO'].apply(normalizar_sexo)
+
+    # 🔥 CLAVE PARA PARQUET
+    for col in df_mapa.columns:
+        df_mapa[col] = df_mapa[col].astype(str)
 
     return df_mapa
