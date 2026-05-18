@@ -1,4 +1,5 @@
 import io
+import time
 
 import streamlit as st
 import geopandas as gpd
@@ -18,7 +19,9 @@ from src.mapas import preparar_gdf_mapa, crear_colormap, crear_mapa_folium
 
 st.set_page_config(layout="wide", page_title="Mapa y Estadísticas — TCU Nirien")
 
-ruta_mapa = "data/limitecantonal_5k_fixed.geojson"
+ruta_mapa = "data/limitecantonal_5k_lite.geojson"
+
+
 ruta_data = "data/mapa_latest.parquet"
 columna_mapa = "CANTÓN"
 
@@ -35,7 +38,21 @@ nombre_amigable = {
 }
 
 st.title("📊 Mapa y Estadísticas — TCU Nirien")
-st.caption("Build de prueba HF")
+st.caption("Monitoreo de rendimiento activado")
+
+
+# ===========================
+# UTILIDAD PARA TIEMPOS
+# ===========================
+
+def iniciar_timer():
+    return time.perf_counter()
+
+def cerrar_timer(t0):
+    return round(time.perf_counter() - t0, 4)
+
+tiempos = {}
+
 
 # ===========================
 # CARGA DE DATOS
@@ -45,31 +62,24 @@ st.caption("Build de prueba HF")
 def cargar_datos():
     df = pd.read_parquet(ruta_data)
 
-    # ======================
     # Normalizar tipos
-    # ======================
-
-    # AÑO
     if 'AÑO' in df.columns:
         df['AÑO'] = pd.to_numeric(df['AÑO'], errors='coerce').astype('Int64')
     else:
         df['AÑO'] = pd.Series([pd.NA] * len(df), dtype="Int64")
 
-    # Flags
     for col in ['CERTIFICADO', 'DESERCION', 'INTERMITENTE']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         else:
             df[col] = 0
 
-    # Strings limpias
     for col in ['CANTON_DEF', 'CURSO', 'CURSO_NORMALIZADO', 'EDAD_CLASIFICADA', 'SEXO_NORMALIZADO']:
         if col in df.columns:
             df[col] = df[col].fillna('Sin dato').astype(str).str.strip()
         else:
             df[col] = 'Sin dato'
 
-    # CURSO_NORMALIZADO por si faltara
     if 'CURSO_NORMALIZADO' not in df.columns or (df['CURSO_NORMALIZADO'] == '').all():
         df['CURSO_NORMALIZADO'] = df['CURSO'].fillna('').astype(str).str.strip().str.lower()
 
@@ -89,14 +99,24 @@ def convertir_a_excel(df_to_save):
     return output.getvalue()
 
 
+# ===========================
+# EJECUCIÓN CON MEDICIÓN
+# ===========================
+
+# Cargar parquet
+t0 = iniciar_timer()
 try:
     df = cargar_datos()
+    tiempos["1. cargar_datos()"] = cerrar_timer(t0)
 except Exception as e:
     st.error(f"Error cargando parquet: {e}")
     st.stop()
 
+# Cargar geojson
+t0 = iniciar_timer()
 try:
     gdf = cargar_geojson()
+    tiempos["2. cargar_geojson()"] = cerrar_timer(t0)
 except Exception as e:
     st.error(f"Error cargando geojson: {e}")
     st.stop()
@@ -109,9 +129,9 @@ except Exception as e:
 with st.sidebar:
     st.header("Filtros")
 
-    # -------------------
-    # CURSOS
-    # -------------------
+    mostrar_tiempos = st.checkbox("Mostrar tiempos de ejecución", value=True)
+
+    # Cursos
     select_all_cursos = st.checkbox("Seleccionar todos los cursos", value=True)
 
     cursos_disponibles_raw = sorted(df['CURSO_NORMALIZADO'].dropna().astype(str).str.strip().unique())
@@ -126,9 +146,7 @@ with st.sidebar:
     else:
         seleccion_cursos_display = None
 
-    # -------------------
-    # AÑOS
-    # -------------------
+    # Años
     select_all_anios = st.checkbox("Seleccionar todos los años", value=True)
 
     anios_disponibles = sorted(
@@ -144,9 +162,7 @@ with st.sidebar:
     else:
         seleccion_anios = None
 
-    # -------------------
-    # CANTONES
-    # -------------------
+    # Cantones
     select_all_cantones = st.checkbox("Seleccionar todos los cantones", value=True)
 
     cantones_disponibles = sorted(df['CANTON_DEF'].dropna().astype(str).str.strip().unique())
@@ -160,9 +176,7 @@ with st.sidebar:
     else:
         seleccion_cantones = None
 
-    # -------------------
-    # FLAGS
-    # -------------------
+    # Flags
     st.markdown("---")
     select_all_flags = st.checkbox(
         "Seleccionar todos los estados (CERTIFICADO / DESERCION / INTERMITENTE)",
@@ -178,9 +192,7 @@ with st.sidebar:
         flag_des = True
         flag_int = True
 
-    # -------------------
-    # EDAD
-    # -------------------
+    # Edad
     st.markdown("---")
     select_all_edades = st.checkbox("Seleccionar todos los grupos de edad", value=True)
 
@@ -195,9 +207,7 @@ with st.sidebar:
     else:
         seleccion_edades = None
 
-    # -------------------
-    # SEXO
-    # -------------------
+    # Sexo
     select_all_sexos = st.checkbox("Seleccionar todos los sexos", value=True)
 
     sexos_disponibles = sorted(df['SEXO_NORMALIZADO'].dropna().astype(str).str.strip().unique())
@@ -216,12 +226,12 @@ with st.sidebar:
 # RESOLVER SELECCIONES
 # ===========================
 
-# Cursos: convertir desde nombre visible a valor real
+t0 = iniciar_timer()
+
 if seleccion_cursos_display is None:
     cursos_filtrados = list(cursos_disponibles_raw)
 else:
     cursos_filtrados = []
-
     for raw, disp in zip(cursos_disponibles_raw, cursos_display):
         if disp in seleccion_cursos_display:
             cursos_filtrados.append(raw)
@@ -246,10 +256,14 @@ if seleccion_sexos is None:
 else:
     sexos_filtrados = seleccion_sexos
 
+tiempos["3. resolver selecciones"] = cerrar_timer(t0)
+
 
 # ===========================
 # FILTRADO
 # ===========================
+
+t0 = iniciar_timer()
 
 mask = pd.Series(True, index=df.index)
 
@@ -268,7 +282,6 @@ if edades_filtradas:
 if sexos_filtrados:
     mask &= df['SEXO_NORMALIZADO'].isin(sexos_filtrados)
 
-# Flags (OR entre seleccionadas)
 if not select_all_flags:
     mask_flag = pd.Series(False, index=df.index)
 
@@ -286,20 +299,29 @@ if not select_all_flags:
 
 df_filtrado = df[mask].copy()
 
+tiempos["4. filtrar dataframe"] = cerrar_timer(t0)
+
 
 # ===========================
 # MAPA Y RESÚMENES
 # ===========================
 
+t0 = iniciar_timer()
 df_cantonal, df_detalle = preparar_datos_resumen(df_filtrado)
+tiempos["5. preparar_datos_resumen()"] = cerrar_timer(t0)
 
+t0 = iniciar_timer()
 gdf_para_mapa, gdf_merged = preparar_gdf_mapa(gdf, df_cantonal, columna_mapa)
+tiempos["6. preparar_gdf_mapa()"] = cerrar_timer(t0)
 
+t0 = iniciar_timer()
 max_val = int(gdf_merged['cantidad_color'].max() or 0)
 colormap, color_cero = crear_colormap(max_val)
+tiempos["7. crear_colormap()"] = cerrar_timer(t0)
 
 st.subheader("🗺️ Mapa")
 
+t0 = iniciar_timer()
 m = crear_mapa_folium(
     gdf_para_mapa=gdf_para_mapa,
     columna_mapa=columna_mapa,
@@ -308,13 +330,18 @@ m = crear_mapa_folium(
     select_all_cantones=select_all_cantones,
     cantones_seleccionados=cantones_filtrados
 )
+tiempos["8. crear_mapa_folium()"] = cerrar_timer(t0)
 
+t0 = iniciar_timer()
 st_folium(m, width=950, height=620, returned_objects=[])
+tiempos["9. st_folium() render server"] = cerrar_timer(t0)
 
 
 # ===========================
 # DETALLE SIN DATO
 # ===========================
+
+t0 = iniciar_timer()
 
 df_sin_dato = df_filtrado[df_filtrado['CANTON_DEF'].fillna('Sin dato') == "Sin dato"]
 total_sin_dato = len(df_sin_dato)
@@ -332,10 +359,14 @@ if total_sin_dato > 0:
                 anio = d['AÑO'] if pd.notna(d['AÑO']) else 'ND'
                 st.write(f"- {curso} ({anio}): {d['conteo']} personas")
 
+tiempos["10. bloque sin dato"] = cerrar_timer(t0)
+
 
 # ===========================
 # ESTADÍSTICAS
 # ===========================
+
+t0 = iniciar_timer()
 
 st.subheader("📊 Estadísticas Descriptivas")
 
@@ -384,24 +415,30 @@ else:
     else:
         st.info("No hay datos con año asignado para graficar la evolución.")
 
+tiempos["11. bloque estadísticas"] = cerrar_timer(t0)
+
 
 # ===========================
 # DESCARGAS
 # ===========================
 
+t0 = iniciar_timer()
+
 st.subheader("📥 Descargar Datos Filtrados")
 
 if not df_filtrado.empty:
-    archivo_excel = convertir_a_excel(df_filtrado)
-    st.download_button(
-        label="📥 Descargar datos filtrados en Excel",
-        data=archivo_excel,
-        file_name='datos_filtrados.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    preparar_descarga = st.button("Preparar Excel filtrado")
+
+    if preparar_descarga:
+        archivo_excel = convertir_a_excel(df_filtrado)
+        st.download_button(
+            label="📥 Descargar datos filtrados en Excel",
+            data=archivo_excel,
+            file_name='datos_filtrados.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
 else:
     st.warning("No hay datos filtrados para descargar.")
-
 
 st.subheader("📥 Descargar Datos Colapsados (por Cantón - Curso - Año)")
 activar_colapsado = st.checkbox("Quiero descargar los datos colapsados por Cantón - Curso - Año")
@@ -453,3 +490,21 @@ if activar_colapsado:
             )
         else:
             st.warning("No hay datos con información de Año y Cantón para colapsar.")
+
+tiempos["12. bloque descargas"] = cerrar_timer(t0)
+
+
+# ===========================
+# PANEL DE TIEMPOS
+# ===========================
+
+if mostrar_tiempos:
+    with st.sidebar.expander("⏱️ Tiempos de ejecución", expanded=True):
+        tiempos_df = pd.DataFrame(
+            [{"Bloque": k, "Segundos": v} for k, v in tiempos.items()]
+        ).sort_values("Segundos", ascending=False)
+
+        st.dataframe(tiempos_df, use_container_width=True)
+
+        total = tiempos_df["Segundos"].sum()
+        st.metric("Tiempo total aproximado (backend)", f"{total:.3f} s")
