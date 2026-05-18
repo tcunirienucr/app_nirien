@@ -19,17 +19,40 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Configure git
-        run: |
-          git config --global user.email "tc665.economia@gmail.com"
-          git config --global user.name "github-actions"
-
       - name: Verify LFS files (debug)
         run: |
           git lfs ls-files || true
+
+      - name: Build clean deploy repo
+        run: |
+          mkdir deploy_repo
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.venv' \
+            --exclude='venv' \
+            --exclude='__pycache__' \
+            ./ deploy_repo/
+
+      - name: Init clean git repo for Hugging Face
+        run: |
+          cd deploy_repo
+          git init
+          git config user.email "tc665.economia@gmail.com"
+          git config user.name "github-actions"
+
+          git lfs install --local
+          git lfs track "*.parquet"
+          git lfs track "*.geojson"
+
+          git add .gitattributes
+          git add .
+          git commit -m "Deploy current snapshot to Hugging Face"
+          git branch -M main
 
       - name: Push to Hugging Face
         env:
           LLAVE_PARA_HUGGINGFACE: ${{ secrets.LLAVE_PARA_HUGGINGFACE }}
         run: |
+          cd deploy_repo
           git push https://user:$LLAVE_PARA_HUGGINGFACE@huggingface.co/spaces/tcunirien/app_interactiva main --force
