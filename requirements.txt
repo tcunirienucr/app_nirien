@@ -6,5 +6,6 @@ folium
 plotly
 branca
 streamlit-folium
-streamlit-gsheets
 pyarrow
+openpyxl
+xlsxwriter
