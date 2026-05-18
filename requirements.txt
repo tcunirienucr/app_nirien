@@ -3,7 +3,8 @@ pandas
 numpy
 geopandas
 folium
-branca
 plotly
+branca
 streamlit-folium
-openpyxl
+streamlit-gsheets
+pyarrow

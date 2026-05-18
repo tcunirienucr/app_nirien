@@ -20,4 +20,3 @@ st.dataframe(df)
 
 # Mensaje de prueba del workflow
 st.success("🚨 TEST WORKFLOW ACTIVO")
-g
