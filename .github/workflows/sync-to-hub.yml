@@ -9,16 +9,27 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          lfs: true
+
+      - name: Configure git
+        run: |
+          git config --global user.email "tc665.economia@gmail.com"
+          git config --global user.name "github-actions"
+
+      - name: Verify LFS files (debug)
+        run: |
+          git lfs ls-files || true
 
       - name: Push to Hugging Face
         env:
           LLAVE_PARA_HUGGINGFACE: ${{ secrets.LLAVE_PARA_HUGGINGFACE }}
         run: |
-          git config --global user.email "tc665.economia@gmail.com"
-          git config --global user.name "github-actions"
-
           git push https://user:$LLAVE_PARA_HUGGINGFACE@huggingface.co/spaces/tcunirien/app_interactiva main --force
