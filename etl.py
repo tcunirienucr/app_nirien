@@ -1,72 +1,83 @@
-from pathlib import Path
+from datetime import datetime
+import shutil
 import pandas as pd
 
-from src.etl_logic import cargar_correcciones, crear_df_mapa
-
-
-# =====================================================
-# CONFIGURACIÓN: SOLO EDITA ESTA PARTE
-# =====================================================
-
-# Ruta al archivo Excel original que tú editas manualmente
-RUTA_XLSX_ORIGINAL = Path(
-    r"G:\Mi unidad\Logistica y administración\Datos para información interactiva\tcunirien_basetotal.xlsx"
+from src.config import (
+    RUTA_XLSX_ORIGINAL,
+    HOJA_ORIGEN,
+    RUTA_PARQUET_DRIVE,
+    RUTA_CSV_DRIVE,
+    RUTA_INVALIDOS_DRIVE,
+    RUTA_PARQUET_REPO,
+    RUTA_CSV_REPO,
+    RUTA_INVALIDOS_REPO,
+    RUTA_CORRECCIONES,
+    asegurar_directorios,
 )
+from src.etl_logic import cargar_correcciones, crear_df_app
 
-# Nombre de hoja dentro del Excel.
-# Si tu archivo tiene solo una hoja principal, puedes dejar 0.
-HOJA_ORIGEN = "mayo2026v4"
 
-# =====================================================
-# RUTAS INTERNAS DEL REPO
-# =====================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-
-RUTA_PARQUET = DATA_DIR / "mapa_latest.parquet"
-RUTA_CSV = DATA_DIR / "mapa_latest.csv"
-RUTA_CORRECCIONES = DATA_DIR / "correcciones_cantones.json"
-RUTA_INVALIDOS = DATA_DIR / "reporte_invalidos_canton.csv"
+def _copiar_si_existe(origen, destino):
+    if origen.exists():
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(origen, destino)
 
 
 def main():
     print("====================================")
     print("ETL TCU NIRIEN — INICIO")
     print("====================================")
+    print(f"HOJA ORIGEN: {HOJA_ORIGEN}")
+    print(f"EXCEL ORIGEN: {RUTA_XLSX_ORIGINAL}")
+
+    asegurar_directorios()
 
     if not RUTA_XLSX_ORIGINAL.exists():
         raise FileNotFoundError(f"No encontré el archivo Excel: {RUTA_XLSX_ORIGINAL}")
 
     print(f"📥 Leyendo Excel origen: {RUTA_XLSX_ORIGINAL}")
     df_original = pd.read_excel(RUTA_XLSX_ORIGINAL, sheet_name=HOJA_ORIGEN, engine="openpyxl")
-
     print(f"✅ Filas leídas: {len(df_original):,}")
 
     correcciones = cargar_correcciones(RUTA_CORRECCIONES)
     print(f"📚 Correcciones cargadas: {len(correcciones)}")
 
-    df_mapa = crear_df_mapa(
+    df_app = crear_df_app(
         df_original=df_original,
         correcciones=correcciones,
-        ruta_invalidos=RUTA_INVALIDOS
+        ruta_invalidos=RUTA_INVALIDOS_DRIVE,
     )
 
-    from datetime import datetime
+    # Metadatos ETL
+    fecha_etl = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df_app["__HOJA_ORIGEN__"] = HOJA_ORIGEN
+    df_app["__FECHA_ETL__"] = fecha_etl
+    df_app["__FILAS_ETL__"] = len(df_app)
 
-    df_mapa['__HOJA_ORIGEN__'] = HOJA_ORIGEN
-    df_mapa['__FECHA_ETL__'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df_mapa['__FILAS_ETL__'] = len(df_mapa)
+    print(f"✅ Filas finales para app: {len(df_app):,}")
+    print("Columnas finales:")
+    print(df_app.columns.tolist())
 
-    print(f"✅ Filas finales para mapa: {len(df_mapa):,}")
+    # =========================
+    # Guardar fuente de verdad en Drive
+    # =========================
+    df_app.to_parquet(RUTA_PARQUET_DRIVE, index=False)
+    print(f"💾 Parquet guardado en Drive: {RUTA_PARQUET_DRIVE}")
 
-    # Guardar parquet
-    df_mapa.to_parquet(RUTA_PARQUET, index=False)
-    print(f"💾 Parquet guardado en: {RUTA_PARQUET}")
+    df_app.to_csv(RUTA_CSV_DRIVE, index=False, encoding="utf-8-sig")
+    print(f"💾 CSV guardado en Drive: {RUTA_CSV_DRIVE}")
 
-    # Guardar CSV de auditoría
-    df_mapa.to_csv(RUTA_CSV, index=False, encoding="utf-8-sig")
-    print(f"💾 CSV guardado en: {RUTA_CSV}")
+    # =========================
+    # Copiar espejo al repo para la app / deploy
+    # =========================
+    _copiar_si_existe(RUTA_PARQUET_DRIVE, RUTA_PARQUET_REPO)
+    _copiar_si_existe(RUTA_CSV_DRIVE, RUTA_CSV_REPO)
+    _copiar_si_existe(RUTA_INVALIDOS_DRIVE, RUTA_INVALIDOS_REPO)
+
+    print(f"📦 Parquet copiado al repo: {RUTA_PARQUET_REPO}")
+    print(f"📦 CSV copiado al repo: {RUTA_CSV_REPO}")
+    if RUTA_INVALIDOS_DRIVE.exists():
+        print(f"📦 Reporte de inválidos copiado al repo: {RUTA_INVALIDOS_REPO}")
 
     print("====================================")
     print("ETL TCU NIRIEN — FIN OK")
@@ -75,8 +86,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-print("====================================")
-print("HOJA QUE SE ESTÁ LEYENDO:")
-print(HOJA_ORIGEN)
-print("====================================")
