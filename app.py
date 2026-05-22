@@ -38,7 +38,7 @@ nombre_amigable = {
 }
 
 st.title("📊 Mapa y Estadísticas — TCU Nirien")
-st.caption("Monitoreo de rendimiento activado")
+#st.caption("Monitoreo de rendimiento activado")
 
 
 # ===========================
