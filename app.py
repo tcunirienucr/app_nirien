@@ -120,6 +120,16 @@ try:
 except Exception as e:
     st.error(f"Error cargando geojson: {e}")
     st.stop()
+##BUSCAR AQUÍ CUANDO QUIERA QUITAR MOSTRAR LA HOJA QUE ESTÁ LEYENDO
+st.subheader("DEBUG PARQUET")
+
+st.write("Filas:", len(df))
+
+if "__HOJA_ORIGEN__" in df.columns:
+    st.write("Hoja origen:", df['__HOJA_ORIGEN__'].unique())
+
+if "__FECHA_ETL__" in df.columns:
+    st.write("Fecha ETL:", df['__FECHA_ETL__'].iloc[0])
 
 
 # ===========================

@@ -52,6 +52,12 @@ def main():
         ruta_invalidos=RUTA_INVALIDOS
     )
 
+    from datetime import datetime
+
+    df_mapa['__HOJA_ORIGEN__'] = HOJA_ORIGEN
+    df_mapa['__FECHA_ETL__'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df_mapa['__FILAS_ETL__'] = len(df_mapa)
+
     print(f"✅ Filas finales para mapa: {len(df_mapa):,}")
 
     # Guardar parquet
@@ -69,3 +75,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+print("====================================")
+print("HOJA QUE SE ESTÁ LEYENDO:")
+print(HOJA_ORIGEN)
+print("====================================")
