@@ -11,6 +11,12 @@ from streamlit_folium import st_folium
 
 from src.transform import preparar_datos_resumen
 from src.mapas import preparar_gdf_mapa, crear_colormap, crear_mapa_folium
+from src.tablas_maestras import (
+    construir_tabla_maestra,
+    exportar_tabla_maestra_excel,
+    construir_panel_exportacion,
+    obtener_etiquetas_disponibles,
+)
 
 
 # ===========================
@@ -20,8 +26,6 @@ from src.mapas import preparar_gdf_mapa, crear_colormap, crear_mapa_folium
 st.set_page_config(layout="wide", page_title="Mapa y Estadísticas — TCU Nirien")
 
 ruta_mapa = "data/limitecantonal_5k_lite.geojson"
-
-
 ruta_data = "data/mapa_latest.parquet"
 columna_mapa = "CANTÓN"
 
@@ -37,8 +41,19 @@ nombre_amigable = {
     "redaccion": "Redacción Consciente"
 }
 
+etiquetas_dimensiones = {
+    "CANTON_FINAL": "Cantón",
+    "AÑO": "Año",
+    "CURSO": "Curso",
+    "CONVOCATORIA": "Convocatoria",
+    "SEXO_MAESTRO": "Sexo",
+    "CONDICION_CURSO": "Condición del curso"
+}
+
+filas_permitidas = ["CANTON_FINAL", "AÑO", "CURSO", "CONVOCATORIA"]
+columnas_permitidas = ["SEXO_MAESTRO", "CONDICION_CURSO"]
+
 st.title("📊 Mapa y Estadísticas — TCU Nirien")
-#st.caption("Monitoreo de rendimiento activado")
 
 
 # ===========================
@@ -48,10 +63,28 @@ st.title("📊 Mapa y Estadísticas — TCU Nirien")
 def iniciar_timer():
     return time.perf_counter()
 
+
 def cerrar_timer(t0):
     return round(time.perf_counter() - t0, 4)
 
+
 tiempos = {}
+
+
+# ===========================
+# HELPERS
+# ===========================
+
+def columna_canton_activa(df_local: pd.DataFrame) -> str:
+    """
+    Mientras el parquet todavía no traiga CANTON_FINAL, usamos fallback a CANTON_DEF.
+    En el siguiente paso del ETL esto se corregirá definitivamente.
+    """
+    if "CANTON_FINAL" in df_local.columns:
+        return "CANTON_FINAL"
+    if "CANTON_DEF" in df_local.columns:
+        return "CANTON_DEF"
+    raise KeyError("No existe ni CANTON_FINAL ni CANTON_DEF en el parquet.")
 
 
 # ===========================
@@ -62,23 +95,31 @@ tiempos = {}
 def cargar_datos():
     df = pd.read_parquet(ruta_data)
 
-    # Normalizar tipos
+    # AÑO
     if 'AÑO' in df.columns:
         df['AÑO'] = pd.to_numeric(df['AÑO'], errors='coerce').astype('Int64')
     else:
         df['AÑO'] = pd.Series([pd.NA] * len(df), dtype="Int64")
 
+    # Flags
     for col in ['CERTIFICADO', 'DESERCION', 'INTERMITENTE']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         else:
             df[col] = 0
 
-    for col in ['CANTON_DEF', 'CURSO', 'CURSO_NORMALIZADO', 'EDAD_CLASIFICADA', 'SEXO_NORMALIZADO']:
+    # Strings limpias
+    for col in [
+        'CANTON_FINAL',
+        'CANTON_DEF',
+        'CURSO',
+        'CURSO_NORMALIZADO',
+        'EDAD_CLASIFICADA',
+        'SEXO_NORMALIZADO',
+        'CONVOCATORIA'
+    ]:
         if col in df.columns:
             df[col] = df[col].fillna('Sin dato').astype(str).str.strip()
-        else:
-            df[col] = 'Sin dato'
 
     if 'CURSO_NORMALIZADO' not in df.columns or (df['CURSO_NORMALIZADO'] == '').all():
         df['CURSO_NORMALIZADO'] = df['CURSO'].fillna('').astype(str).str.strip().str.lower()
@@ -103,7 +144,6 @@ def convertir_a_excel(df_to_save):
 # EJECUCIÓN CON MEDICIÓN
 # ===========================
 
-# Cargar parquet
 t0 = iniciar_timer()
 try:
     df = cargar_datos()
@@ -112,7 +152,6 @@ except Exception as e:
     st.error(f"Error cargando parquet: {e}")
     st.stop()
 
-# Cargar geojson
 t0 = iniciar_timer()
 try:
     gdf = cargar_geojson()
@@ -120,30 +159,34 @@ try:
 except Exception as e:
     st.error(f"Error cargando geojson: {e}")
     st.stop()
-##BUSCAR AQUÍ CUANDO QUIERA QUITAR MOSTRAR LA HOJA QUE ESTÁ LEYENDO
-st.subheader("DEBUG PARQUET")
-
-st.write("Filas:", len(df))
-
-if "__HOJA_ORIGEN__" in df.columns:
-    st.write("Hoja origen:", df['__HOJA_ORIGEN__'].unique())
-
-if "__FECHA_ETL__" in df.columns:
-    st.write("Fecha ETL:", df['__FECHA_ETL__'].iloc[0])
 
 
 # ===========================
-# SIDEBAR (filtros)
+# METADATA DE FUENTE
+# ===========================
+
+col_meta1, col_meta2 = st.columns([2, 3])
+
+with col_meta1:
+    if "__HOJA_ORIGEN__" in df.columns:
+        st.caption(f"Hoja origen: {df['__HOJA_ORIGEN__'].iloc[0]}")
+
+with col_meta2:
+    if "__FECHA_ETL__" in df.columns:
+        st.caption(f"Última actualización ETL: {df['__FECHA_ETL__'].iloc[0]}")
+
+
+# ===========================
+# SIDEBAR (filtros globales)
 # ===========================
 
 with st.sidebar:
-    st.header("Filtros")
+    st.header("Filtros globales")
 
-    mostrar_tiempos = st.checkbox("Mostrar tiempos de ejecución", value=True)
+    mostrar_tiempos = st.checkbox("Mostrar tiempos de ejecución", value=False)
 
     # Cursos
     select_all_cursos = st.checkbox("Seleccionar todos los cursos", value=True)
-
     cursos_disponibles_raw = sorted(df['CURSO_NORMALIZADO'].dropna().astype(str).str.strip().unique())
     cursos_display = [nombre_amigable.get(c, c.title()) for c in cursos_disponibles_raw]
 
@@ -158,10 +201,7 @@ with st.sidebar:
 
     # Años
     select_all_anios = st.checkbox("Seleccionar todos los años", value=True)
-
-    anios_disponibles = sorted(
-        df['AÑO'].dropna().astype(int).unique().tolist()
-    )
+    anios_disponibles = sorted(df['AÑO'].dropna().astype(int).unique().tolist())
 
     if not select_all_anios:
         seleccion_anios = st.multiselect(
@@ -174,8 +214,8 @@ with st.sidebar:
 
     # Cantones
     select_all_cantones = st.checkbox("Seleccionar todos los cantones", value=True)
-
-    cantones_disponibles = sorted(df['CANTON_DEF'].dropna().astype(str).str.strip().unique())
+    col_canton_sidebar = columna_canton_activa(df)
+    cantones_disponibles = sorted(df[col_canton_sidebar].dropna().astype(str).str.strip().unique())
 
     if not select_all_cantones:
         seleccion_cantones = st.multiselect(
@@ -202,24 +242,9 @@ with st.sidebar:
         flag_des = True
         flag_int = True
 
-    # Edad
-    st.markdown("---")
-    select_all_edades = st.checkbox("Seleccionar todos los grupos de edad", value=True)
-
-    edades_disponibles = sorted(df['EDAD_CLASIFICADA'].dropna().astype(str).str.strip().unique())
-
-    if not select_all_edades:
-        seleccion_edades = st.multiselect(
-            "Edad",
-            edades_disponibles,
-            default=edades_disponibles
-        )
-    else:
-        seleccion_edades = None
-
     # Sexo
+    st.markdown("---")
     select_all_sexos = st.checkbox("Seleccionar todos los sexos", value=True)
-
     sexos_disponibles = sorted(df['SEXO_NORMALIZADO'].dropna().astype(str).str.strip().unique())
 
     if not select_all_sexos:
@@ -233,7 +258,7 @@ with st.sidebar:
 
 
 # ===========================
-# RESOLVER SELECCIONES
+# RESOLVER SELECCIONES GLOBALES
 # ===========================
 
 t0 = iniciar_timer()
@@ -256,21 +281,16 @@ if seleccion_cantones is None:
 else:
     cantones_filtrados = seleccion_cantones
 
-if seleccion_edades is None:
-    edades_filtradas = edades_disponibles
-else:
-    edades_filtradas = seleccion_edades
-
 if seleccion_sexos is None:
     sexos_filtrados = sexos_disponibles
 else:
     sexos_filtrados = seleccion_sexos
 
-tiempos["3. resolver selecciones"] = cerrar_timer(t0)
+tiempos["3. resolver selecciones globales"] = cerrar_timer(t0)
 
 
 # ===========================
-# FILTRADO
+# FILTRADO GLOBAL
 # ===========================
 
 t0 = iniciar_timer()
@@ -284,10 +304,7 @@ if anios_filtrados:
     mask &= df['AÑO'].isin(anios_filtrados)
 
 if cantones_filtrados:
-    mask &= df['CANTON_DEF'].isin(cantones_filtrados)
-
-if edades_filtradas:
-    mask &= df['EDAD_CLASIFICADA'].isin(edades_filtradas)
+    mask &= df[columna_canton_activa(df)].isin(cantones_filtrados)
 
 if sexos_filtrados:
     mask &= df['SEXO_NORMALIZADO'].isin(sexos_filtrados)
@@ -309,7 +326,7 @@ if not select_all_flags:
 
 df_filtrado = df[mask].copy()
 
-tiempos["4. filtrar dataframe"] = cerrar_timer(t0)
+tiempos["4. filtrar dataframe global"] = cerrar_timer(t0)
 
 
 # ===========================
@@ -340,6 +357,10 @@ m = crear_mapa_folium(
     select_all_cantones=select_all_cantones,
     cantones_seleccionados=cantones_filtrados
 )
+
+bounds = gdf.total_bounds
+m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+
 tiempos["8. crear_mapa_folium()"] = cerrar_timer(t0)
 
 t0 = iniciar_timer()
@@ -353,7 +374,9 @@ tiempos["9. st_folium() render server"] = cerrar_timer(t0)
 
 t0 = iniciar_timer()
 
-df_sin_dato = df_filtrado[df_filtrado['CANTON_DEF'].fillna('Sin dato') == "Sin dato"]
+col_canton_actual = columna_canton_activa(df_filtrado)
+
+df_sin_dato = df_filtrado[df_filtrado[col_canton_actual].fillna('Sin dato') == "Sin dato"]
 total_sin_dato = len(df_sin_dato)
 
 if total_sin_dato > 0:
@@ -383,7 +406,6 @@ st.subheader("📊 Estadísticas Descriptivas")
 if df_filtrado.empty:
     st.info("No hay datos con los filtros seleccionados.")
 else:
-    # Resumen por curso
     st.subheader("Resumen por Curso")
     resumen_curso = df_filtrado.groupby(['CURSO_NORMALIZADO', 'CERTIFICADO']).size().unstack(fill_value=0)
     resumen_curso['Total'] = resumen_curso.sum(axis=1)
@@ -393,16 +415,15 @@ else:
     resumen_curso = resumen_curso.rename(index=nombre_amigable)
     st.dataframe(resumen_curso, use_container_width=True)
 
-    # Resumen por cantón
     st.subheader("Resumen por Cantón")
-    resumen_canton = df_filtrado.groupby(['CANTON_DEF', 'CERTIFICADO']).size().unstack(fill_value=0)
+    col_canton_resumen = columna_canton_activa(df_filtrado)
+    resumen_canton = df_filtrado.groupby([col_canton_resumen, 'CERTIFICADO']).size().unstack(fill_value=0)
     resumen_canton['Total'] = resumen_canton.sum(axis=1)
     resumen_canton['% Certificado'] = (
         resumen_canton.get(1, 0) / resumen_canton['Total']
     ).replace([np.inf, -np.inf, np.nan], 0) * 100
     st.dataframe(resumen_canton, use_container_width=True)
 
-    # Línea por año
     st.subheader("Gráfico de Línea por Año")
     df_anual_filtrado = df_filtrado.dropna(subset=['AÑO']).copy()
 
@@ -429,7 +450,120 @@ tiempos["11. bloque estadísticas"] = cerrar_timer(t0)
 
 
 # ===========================
-# DESCARGAS
+# TABLA MAESTRA
+# ===========================
+
+st.subheader("🧮 Tabla resumen maestra")
+
+st.markdown(
+    """
+    Esta tabla usa el **dataset actualmente filtrado** en la barra lateral y permite:
+    - elegir el universo: **Todos** o **Beneficiarios**
+    - elegir dimensiones de filas (verticales)
+    - elegir dimensiones de columnas (horizontales)
+    - descargar el resultado en Excel
+    """
+)
+
+col_tm_1, col_tm_2, col_tm_3 = st.columns([1.2, 1.8, 1.8])
+
+with col_tm_1:
+    universo_visible = st.radio(
+        "Universo",
+        ["Todos", "Beneficiarios"],
+        horizontal=False
+    )
+    universo_tabla = "todos" if universo_visible == "Todos" else "beneficiarios"
+
+with col_tm_2:
+    row_dims_visible = st.multiselect(
+        "Dimensiones verticales",
+        options=filas_permitidas,
+        format_func=lambda x: etiquetas_dimensiones.get(x, x),
+        default=["CANTON_FINAL"]
+    )
+
+with col_tm_3:
+    col_dims_visible = st.multiselect(
+        "Dimensiones horizontales",
+        options=columnas_permitidas,
+        format_func=lambda x: etiquetas_dimensiones.get(x, x),
+        default=["SEXO_MAESTRO", "CONDICION_CURSO"]
+    )
+
+if len(row_dims_visible) == 0:
+    st.warning("Debes seleccionar al menos una dimensión vertical.")
+elif len(col_dims_visible) == 0:
+    st.warning("Debes seleccionar al menos una dimensión horizontal.")
+else:
+    try:
+        etiquetas_disponibles = obtener_etiquetas_disponibles(df_filtrado)
+
+        with st.expander("🔎 Etiquetas disponibles según los filtros actuales", expanded=False):
+            for dim in row_dims_visible + col_dims_visible:
+                if dim == "CANTON_FINAL":
+                    valores = etiquetas_disponibles["cantones_disponibles"]
+                elif dim == "AÑO":
+                    valores = etiquetas_disponibles["anios_disponibles"]
+                elif dim == "CURSO":
+                    valores = etiquetas_disponibles["cursos_disponibles"]
+                elif dim == "CONVOCATORIA":
+                    valores = etiquetas_disponibles["convocatorias_disponibles"]
+                elif dim == "SEXO_MAESTRO":
+                    valores = etiquetas_disponibles["sexos_disponibles"]
+                elif dim == "CONDICION_CURSO":
+                    valores = etiquetas_disponibles["condiciones_disponibles"]
+                else:
+                    valores = []
+
+                st.write(f"**{etiquetas_dimensiones.get(dim, dim)}** ({len(valores)}): {valores}")
+
+    except Exception as e:
+        st.info(f"No se pudieron calcular etiquetas disponibles: {e}")
+
+    t0 = iniciar_timer()
+    try:
+        tabla_maestra = construir_tabla_maestra(
+            df_base=df_filtrado,
+            row_dims=row_dims_visible,
+            col_dims=col_dims_visible,
+            universo=universo_tabla,
+            incluir_total_fila=True,
+            incluir_total_general=True
+        )
+        tiempos["12. construir_tabla_maestra()"] = cerrar_timer(t0)
+
+        st.markdown("### Vista de la tabla maestra")
+        tabla_para_ver = tabla_maestra.reset_index()
+        st.dataframe(tabla_para_ver, use_container_width=True)
+
+        panel_export = construir_panel_exportacion(
+            df_base=df_filtrado,
+            universo=universo_tabla
+        )
+
+        st.markdown("### Descargar tabla maestra")
+        preparar_excel_tabla = st.button("Preparar Excel de la tabla maestra")
+
+        if preparar_excel_tabla:
+            archivo_excel_tabla = exportar_tabla_maestra_excel(
+                tabla=tabla_maestra,
+                panel_df=panel_export
+            )
+
+            st.download_button(
+                label="📥 Descargar tabla maestra en Excel",
+                data=archivo_excel_tabla,
+                file_name=f"tabla_maestra_{universo_tabla}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    except Exception as e:
+        st.error(f"Error construyendo la tabla maestra: {e}")
+
+
+# ===========================
+# DESCARGAS EXISTENTES
 # ===========================
 
 t0 = iniciar_timer()
@@ -457,7 +591,9 @@ if activar_colapsado:
     if df_filtrado.empty:
         st.warning("No hay datos para colapsar con los filtros actuales.")
     else:
-        df_temp = df_filtrado.dropna(subset=['AÑO', 'CANTON_DEF']).copy()
+        df_temp = df_filtrado.dropna(subset=['AÑO']).copy()
+        col_canton_colapso = columna_canton_activa(df_temp)
+        df_temp = df_temp.dropna(subset=[col_canton_colapso]).copy()
 
         if not df_temp.empty:
             df_temp['CURSO_AÑO'] = (
@@ -471,7 +607,7 @@ if activar_colapsado:
             df_pivot = (
                 df_temp
                 .pivot_table(
-                    index='CANTON_DEF',
+                    index=col_canton_colapso,
                     columns='CURSO_AÑO',
                     values='CERTIFICADO',
                     aggfunc='count',
@@ -480,11 +616,11 @@ if activar_colapsado:
                 .reset_index()
             )
 
-            df_pivot['TOTAL'] = df_pivot.drop(columns='CANTON_DEF').sum(axis=1)
+            df_pivot['TOTAL'] = df_pivot.drop(columns=col_canton_colapso).sum(axis=1)
 
             columnas_ordenadas = (
-                ['CANTON_DEF']
-                + sorted([c for c in df_pivot.columns if c not in ['CANTON_DEF', 'TOTAL']])
+                [col_canton_colapso]
+                + sorted([c for c in df_pivot.columns if c not in [col_canton_colapso, 'TOTAL']])
                 + ['TOTAL']
             )
 
@@ -501,7 +637,7 @@ if activar_colapsado:
         else:
             st.warning("No hay datos con información de Año y Cantón para colapsar.")
 
-tiempos["12. bloque descargas"] = cerrar_timer(t0)
+tiempos["13. bloque descargas"] = cerrar_timer(t0)
 
 
 # ===========================
