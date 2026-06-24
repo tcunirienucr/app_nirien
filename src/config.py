@@ -7,12 +7,12 @@ from pathlib import Path
 
 # Carpeta persistente en Google Drive donde se guardan los artefactos ETL.
 DRIVE_AUX_DIR = Path(
-    r"G:\Mi unidad\Logistica y administración\Datos para información interactiva"
+    r"G:\My Drive\Logistica y administración\Datos para información interactiva"
 )
 
 # Archivo Excel original sincronizado desde Google Drive.
 RUTA_XLSX_ORIGINAL = Path(
-    r"G:\Mi unidad\Logistica y administración\Datos para información interactiva\tcunirien_basetotal.xlsx"
+    r"G:\My Drive\Logistica y administración\Datos para información interactiva\tcunirien_basetotal.xlsx"
 )
 
 # Hoja origen actual del Excel.
