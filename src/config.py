@@ -16,7 +16,7 @@ RUTA_XLSX_ORIGINAL = Path(
 )
 
 # Hoja origen actual del Excel.
-HOJA_ORIGEN = "mayo2026v4"
+HOJA_ORIGEN = "junio2026v1"
 
 # =====================================================
 # RUTAS DEL REPO
